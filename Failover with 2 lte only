@@ -1,0 +1,81 @@
+:global PrimaryLte lte2
+:global SecondaryLte lte4
+:global ClientTariff 7 
+:global BandwidthMax ($ClientTariff + 5)
+:set BandwidthMax ([:tostr $BandwidthMax]."M")
+:global IpBandTestSecond  <IP>
+:global IpBandTestFirst <IP>
+:global IpBandTestSecondGW <IP/MASK ex. 213.111.222.333/32>
+:global IpBandTestFirstGW <IP/MASK ex. 213.111.222.333/32>
+:global BtestPass btest
+:global BtestUser btest
+
+/interface lte comment $SecondaryLte comment=Secondary
+/interface lte comment $PrimaryLte comment=Primary
+
+:if ([:len [/ip dhcp-client find interface=[ /interface lte get [/interface find comment=Primary ] name ]]]>0) do={
+} else={/ip dhcp-client add interface [ /interface find comment=Primary] disabled=no add-default-route=yes default-route-distance=10}
+
+:if ([:len [/ip dhcp-client find interface=[ /interface lte get [/interface find comment=Secondary ] name ]]]>0) do={
+} else={/ip dhcp-client add interface [ /interface find comment=Secondary] disabled=no add-default-route=yes default-route-distance=11}
+
+:delay 6
+
+:if ([:len [/ip route find dst-address=$IpBandTestFirstGW gateway=[ /ip dhcp-client get [/ip dhcp-client find interface=$PrimaryLte ] gateway ]]]< 1) do={
+/ip route add dst-address=$IpBandTestFirst gateway=[ /ip dhcp-client get [/ip dhcp-client find interface=$PrimaryLte ] gateway ] }
+:if ([:len [/ip route find dst-address=$IpBandTestSecondGW gateway=[ /ip dhcp-client get [/ip dhcp-client find interface=$SecondaryLte ] gateway ]]] < 1) do={
+/ip route add dst-address=$IpBandTestSecond gateway=[ /ip dhcp-client get [/ip dhcp-client find interface=$SecondaryLte ] gateway ] }
+
+:if ([:len [/ip route find comment=Primary]] < 1) do={
+/ip route add dst-address=0.0.0.0/0 gateway=[ /ip dhcp-client get [/ip dhcp-client find interface=$PrimaryLte ] gateway ] distance=1 comment=Primary }
+
+:if ([:len [/ip route find comment=Secondary]] < 1) do={
+/ip route add dst-address=0.0.0.0/0 gateway=[ /ip dhcp-client get [/ip dhcp-client find interface=$SecondaryLte ] gateway ] distance=2 comment=Secondary }
+
+:put $wanTrafRxRes
+if ($wanTrafRxRes < $ClientTariff)  do={
+    /tool {
+        :global txAvgSecondary 0
+        :global rxAvgSecondary 0
+        bandwidth-test $IpBandTestSecond duration=5s direction=receive protocol=tcp user=$BtestUser password=$BtestPass local-tx-speed=($BandwidthMax) remote-tx-speed=($BandwidthMax) do={
+            :if ($txAvgSecondary < $"tx-10-second-average") do={
+                :set txAvgSecondary $"tx-10-second-average"
+            }
+            :if ($rxAvgSecondary < $"rx-10-second-average") do={
+                :set rxAvgSecondary $"rx-10-second-average"
+            }
+        }
+        :put ("tx: " . ($txAvgSecondary / 1024) . " rx: " .  ($rxAvgSecondary / 1024))
+        :local txAvgKbSecondary ($txAvgSecondary / 1024)
+        :local rxAvgKbSecondary ($rxAvgSecondary / 1024)
+        :global rxAvg1Secondary ($rxAvgKbSecondary / 1024  )
+        /system script add name=Test1 comment=$rxAvg1Secondary
+		
+    }
+	
+    
+
+}
+:delay 3s
+:local TrafficPrimary [/system script get Traffic_Monitor comment ]
+:put "Traffic na $PrimaryLte $TrafficPrimary"
+:put "ClientTariff $ClientTariff"
+:log warning "Traffic na $PrimaryLte $TrafficPrimary"
+:log warning "ClientTariff $ClientTariff"
+
+:global BandwidthSecond [/system script get Test1 comment  ]
+if (($TrafficPrimary < $ClientTariff) and ($BandwidthSecond > $TrafficPrimary)) do={
+	        /ip route set [find comment="Secondary"] distance=1
+            /ip route set [find comment="Primary"] distance=2
+          :log warning "Route to Secondary"
+	
+	} else={
+	        /ip route set [find comment="Secondary"] distance=2
+            /ip route set [find comment="Primary"] distance=1
+            :log warning "Route to Primary"
+	}
+:put "BandwidthSecond $BandwidthSecond"
+:log warning "BandwidthSecond $BandwidthSecond"
+:put "($TrafficPrimary < $ClientTariff) and ($BandwidthSecond > $TrafficPrimary))"
+:log warning "($TrafficPrimary < $ClientTariff) and ($BandwidthSecond > $TrafficPrimary))"
+/system script remove Test1
