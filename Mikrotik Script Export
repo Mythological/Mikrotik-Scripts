@@ -1,0 +1,154 @@
+:global eoipTunnelId 25;
+:global externalselfIpAddr 77.77.77.77;
+:global l2tplocal 10.10.95.25;
+:global l2tpremote 10.10.95.26;
+:global Identity SO-01;
+:global L2tpUser ($Identity . "_Ga");
+:global l2tppass "77777777777%";
+:global l2tpServer 9.5.7.8;
+:global ipsecsecret "HT77777777777)";
+:global eoipname ("eoip-voice-" . $Identity . "-Ga");
+:global dhcpnetwork "10.10.65.32/27";
+:global gateway "10.10.65.33";
+:global mask "/27";
+:global mask1 "27";
+:global dhcprange "10.10.65.34-10.10.65.62";
+:global ethermaster ($gateway . $mask);
+:global ethermasternet "10.10.65.32";
+:global Notdhcpnetwork ("!" . $dhcpnetwork);
+:global BackupFile ($Identity . ".rsc");
+:put "End of configuration"
+/interface bridge add name=bridge
+/interface list add name=WAN
+/interface list add name=LAN
+/interface list member add interface=ether1 list=WAN
+/interface list member add interface=bridge list=LAN
+/interface bridge add name=bridge-voice
+/interface l2tp-client add allow=mschap2 connect-to=$l2tpServer disabled=yes ipsec-secret=$ipsecsecret name=l2tp-out1 password=$l2tppass use-ipsec=yes user=$L2tpUser
+/interface eoip add !keepalive local-address=$l2tplocal name=$eoipname remote-address=$l2tpremote tunnel-id=$eoipTunnelId
+/interface vlan add interface=bridge name=vlan220 vlan-id=220
+/interface vlan add interface=$eoipname name="voice vlan" vlan-id=221
+/ip pool add name=dhcp1 ranges=$dhcprange
+/ip dhcp-server add address-pool=dhcp1 disabled=no interface=bridge name=dhcp1
+/snmp community set [ find default=yes ] addresses=10.10.95.0/24
+/interface bridge port add bridge=bridge-voice interface=vlan220
+/interface bridge port add bridge=bridge-voice interface="voice vlan"
+/ip neighbor discovery-settings set discover-interface-list=LAN
+/ip address add address=$ethermaster comment=defconf interface=ether2 network=$ethermasternet
+/ip dhcp-client add add-default-route=no interface=bridge-voice
+/ip dhcp-server network add address=$dhcpnetwork gateway=$gateway netmask=$mask1
+/ip firewall address-list add address=0.0.0.0/8 list=BOGON
+/ip firewall address-list add address=100.64.0.0/10 list=BOGON
+/ip firewall address-list add address=127.0.0.0/8 list=BOGON
+/ip firewall address-list add address=169.254.0.0/16 list=BOGON
+/ip firewall address-list add address=192.0.0.0/24 list=BOGON
+/ip firewall address-list add address=192.0.2.0/24 list=BOGON
+/ip firewall address-list add address=192.168.0.0/16 list=BOGON
+/ip firewall address-list add address=198.18.0.0/15 list=BOGON
+/ip firewall address-list add address=198.51.100.0/24 list=BOGON
+/ip firewall address-list add address=203.0.113.0/24 list=BOGON
+/ip firewall address-list add address=224.0.0.0/4 list=BOGON
+/ip firewall address-list add address=240.0.0.0/4 list=BOGON
+/ip firewall address-list add address=9.5.7.8 list=White
+/ip firewall address-list add address=109.196.188.131 list=BOGON
+/ip firewall address-list add address=178.252.127.214 list=BOGON
+/ip firewall address-list add address=77.106.247.141 list=BOGON
+/ip firewall address-list add address=6.1.3.2 list=White
+/ip firewall address-list add address=$dhcpnetwork list=White
+/ip firewall address-list add address=192.88.99.0/24 list=BOGON
+/ip firewall address-list add address=1.2.4.4 list=White
+/ip firewall address-list add address=9.1.7.0 list=White
+/ip firewall address-list add address=vpn1.ru list=White
+/ip firewall address-list add address=10.10.64.0/19 list=White
+/ip firewall address-list add address=10.10.10.0/24 list=White
+/ip firewall address-list add address=10.10.20.0/23 list=White
+/ip firewall address-list add address=1.4.7.2 list=White
+/ip firewall filter add action=drop chain=input connection-state=new in-interface=ether1 protocol=ipsec-esp src-address-list=l2tp-brutforce
+/ip firewall filter add action=drop chain=input connection-state=new dst-port=1701,500,4500 protocol=udp src-address-list=l2tp-brutforce
+/ip firewall filter add action=add-src-to-address-list address-list=l2tp-brutforce address-list-timeout=2w chain=input connection-state=new dst-port=1701 protocol=udp src-address-list=probe2
+/ip firewall filter add action=add-src-to-address-list address-list=probe2 address-list-timeout=1m chain=input connection-state=new dst-port=1701 protocol=udp src-address-list=probe1
+/ip firewall filter add action=add-src-to-address-list address-list=probe1 address-list-timeout=1m chain=input connection-state=new dst-port=1701 protocol=udp
+/ip firewall filter add action=add-dst-to-address-list address-list=l2tp-brutforce address-list-timeout=1m chain=output content="M=bad" dst-address-list=l2tp-brutforce-level2
+/ip firewall filter add action=add-dst-to-address-list address-list=l2tp-brutforce-level2 address-list-timeout=1m chain=output content="M=bad" dst-address-list=l2tp-brutforce-level1
+/ip firewall filter add action=add-dst-to-address-list address-list=l2tp-brutforce-level1 address-list-timeout=1m chain=output content="M=bad"
+/ip firewall filter add action=accept chain=input dst-port=1701 in-interface=ether1 ipsec-policy=in,ipsec protocol=udp src-address-list=White
+/ip firewall filter add action=drop chain=input dst-port=1701 in-interface=ether1 protocol=udp
+/ip firewall filter add action=accept chain=input dst-address=$externalselfIpAddr dst-port=500,4500 in-interface=ether1 protocol=udp src-address-list=White
+/ip firewall filter add action=accept chain=input in-interface=ether1 protocol=ipsec-esp src-address-list=White
+/ip firewall filter add action=accept chain=forward disabled=yes dst-address=10.10.10.0/24 src-address=$dhcpnetwork
+/ip firewall filter add action=accept chain=forward disabled=yes dst-address=$dhcpnetwork src-address=10.10.10.0/24
+/ip firewall filter add action=accept chain=input in-interface=l2tp-out1
+/ip firewall filter add action=accept chain=forward in-interface=l2tp-out1
+/ip firewall filter add action=accept chain=forward out-interface=l2tp-out1
+/ip firewall filter add action=accept chain=input comment="Est, Related" connection-state=established,related
+/ip firewall filter add action=drop chain=input comment=Invalid connection-state=invalid
+/ip firewall filter add action=accept chain=forward comment="EST Related" connection-state=established,related
+/ip firewall filter add action=drop chain=forward comment=Invalid connection-state=invalid
+/ip firewall filter add action=accept chain=input comment="PPTP VPN (made by vb)" dst-port=1723 protocol=tcp
+/ip firewall filter add action=accept chain=input protocol=gre
+/ip firewall filter add action=accept chain=input dst-port=8291 protocol=tcp src-address-list=White
+/ip firewall filter add action=accept chain=input comment=ICMP protocol=icmp
+/ip firewall filter add action=drop chain=input comment=BOGON in-interface=ether1 src-address-list=BOGON
+/ip firewall filter add action=accept chain=input connection-state=new dst-port=22,443,80 in-interface=ether1 protocol=tcp src-address-list=White
+/ip firewall filter add action=drop chain=input in-interface=ether1
+/ip firewall filter add action=drop chain=forward comment=!dstnat connection-nat-state=!dstnat connection-state=new in-interface=ether1
+/ip firewall filter add action=drop chain=forward comment="Drop incoming from internet which is not public IP" in-interface=ether1 log=yes log-prefix=!public src-address-list=BOGON
+/ip firewall filter add action=drop chain=forward comment="Drop packets from LAN that do not have LAN IP" in-interface=bridge log=yes log-prefix=LAN_!LAN src-address=$Notdhcpnetwork
+/ip firewall filter add action=accept chain=forward
+/ip firewall nat add action=accept chain=srcnat disabled=yes dst-address=10.10.9.0/24 src-address=$dhcpnetwork
+/ip firewall nat add action=masquerade chain=srcnat out-interface-list=WAN
+/ip firewall service-port set tftp disabled=yes
+/ip firewall service-port set sip disabled=yes
+/ip route add distance=1 dst-address=10.10.18.253/32 gateway=l2tp-out1
+/ip route add distance=1 dst-address=10.10.20.0/23 gateway=l2tp-out1
+/ip service set telnet disabled=yes
+/ip service set ftp disabled=yes
+/ip service set www disabled=no
+/ip service set api disabled=yes
+/ip service set api-ssl disabled=yes
+/ip ssh set allow-none-crypto=yes forwarding-enabled=remote
+/snmp set contact=s.l@sso.ru enabled=yes location=$L2tpUser trap-generators=start-trap trap-version=2
+/system clock set time-zone-name=Europe/Moscow
+/system identity set name=$Identity
+/system logging set 0 disabled=yes
+/system logging add topics=account
+/system scheduler add interval=1w name=export_email on-event="/system script run export_email" policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon start-date=feb/18/2020 start-time=08:38:01
+/tool bandwidth-server set enabled=no
+/tool e-mail set address=smtp.yandex.ru from=<Mikrotik@yandex.ru> password=888888888* port=587 start-tls=yes user=Mikrotik@yandex.ru
+/tool mac-server set allowed-interface-list=LAN
+/tool mac-server mac-winbox set allowed-interface-list=LAN
+/tool mac-server ping set enabled=no
+/certificate add name=root-cert common-name=so days-valid=7777 key-usage=key-cert-sign,crl-sign
+:delay 2
+/certificate sign root-cert
+:delay 8
+/certificate add name=ssl-cert common-name=so days-valid=7777
+:delay 2
+/certificate sign ca=root-cert ssl-cert
+:delay 8
+/ip service set www-ssl certificate=ssl-cert disabled=no
+
+/ip firewall mangle
+add action=mark-connection chain=prerouting comment=SIP dst-port=5060,5061,5160,10000-20000 new-connection-mark=SIP-Conn passthrough=no protocol=udp
+add action=mark-packet chain=forward connection-mark=SIP-Conn in-interface=ether1 new-packet-mark=SIP_IN passthrough=no
+add action=mark-packet chain=forward connection-mark=SIP-Conn new-packet-mark=SIP_OUT out-interface=ether1 passthrough=no
+add action=mark-connection chain=prerouting comment=OVPN-SIP dst-port=1194 new-connection-mark=OVPN-SIP passthrough=no protocol=udp
+add action=mark-packet chain=forward connection-mark=OVPN-SIP in-interface=ether1 new-packet-mark=OVPN-SIP_IN passthrough=no
+add action=mark-packet chain=forward connection-mark=OVPN-SIP new-packet-mark=OVPN-SIP_OUT out-interface=ether1 passthrough=no
+add action=mark-packet chain=forward comment=Other in-interface=ether1 new-packet-mark=Other_IN passthrough=no
+add action=mark-packet chain=forward new-packet-mark=Other_Out out-interface=ether1 passthrough=no
+
+/queue type
+add kind=pcq name=SIP pcq-classifier=src-address,dst-address,src-port,dst-port pcq-dst-address6-mask=64 pcq-rate=170k pcq-src-address6-mask=64
+
+/queue tree
+add max-limit=43M name=IN parent=global
+add max-limit=50M name=OUT parent=global
+add max-limit=1M name=SIP_IN packet-mark=SIP_IN parent=IN priority=2 queue=SIP
+add max-limit=1M name=SIP_OUT packet-mark=SIP_OUT parent=OUT priority=2 queue=SIP
+add max-limit=512k name=Nextcloud_In packet-mark=Nextcloud_IN parent=IN priority=7 queue=pcq-download-default
+add max-limit=750k name=Nextcloud_out packet-mark=Nextcloud_OUT parent=OUT priority=7 queue=pcq-upload-default
+add max-limit=2M name=OVPN_SIP_IN packet-mark=OVPN-SIP_IN parent=IN priority=3 queue=pcq-download-default
+add max-limit=2M name=OVPN_SIP_OUT packet-mark=OVPN-SIP_OUT parent=OUT priority=3 queue=pcq-upload-default
+add max-limit=40M name=Other_IN packet-mark=Other_IN parent=IN priority=6 queue=pcq-download-default
+add max-limit=45M name=Other_OUT packet-mark=Other_Out parent=OUT priority=6 queue=pcq-upload-default
