@@ -1,0 +1,294 @@
+# Tunnel id occupied 1,2,3,4,5,6,7,8,9,10,11,25,26,27,28,29,30,31,32,33,34,35,36,45
+:global eoipTunnelId 11;
+:global externalselfIpAddr 89.111.15.2;
+# VPN addresses occupied 1-38,147-164
+:global l2tplocal 172.16.95.37;
+:global l2tpremote 172.16.95.38;
+:global Identity RE-09;
+:global l2tppass "5UJEfg";
+:global ipsecsecret "fU2zfqH";
+:global dhcpnetwork "172.16.67.0/26";
+:global gateway "172.16.67.1";
+:global mask "/26";
+:global mask1 "26";
+:global dhcprange "172.16.67.2-172.16.67.62";
+:global ethermaster ($gateway . $mask);
+:global ethermasternet "172.16.67.0";
+:global Notdhcpnetwork ("!" . $dhcpnetwork);
+:global BackupFile ($Identity . ".rsc");
+:put "End of enviroment"
+/interface l2tp-server server set authentication=mschap2 enabled=yes ipsec-secret=$ipsecsecret use-ipsec=yes
+/ppp secret add local-address=$l2tplocal name=Ga password=$l2tppass remote-address=$l2tpremote service=l2tp profile=default-encryption
+/interface bridge add name=bridge-voice
+/interface eoip add !keepalive local-address=$l2tplocal name=eoip-voice-Ga remote-address=$l2tpremote tunnel-id=$eoipTunnelId
+/interface vlan add interface=bridge name=vlan220 vlan-id=220
+/interface vlan add interface=eoip-voice-Ga name="voice vlan" vlan-id=221
+/snmp community set [ find default=yes ] addresses=172.16.95.0/24
+/interface bridge port add bridge=bridge-voice interface=vlan220
+/interface bridge port add bridge=bridge-voice interface="voice vlan"
+/ip neighbor discovery-settings set discover-interface-list=LAN
+/ip dhcp-client add add-default-route=no interface=bridge-voice
+/ip firewall address-list add address=62.1.1.2 list=White
+/ip firewall address-list add address=$dhcpnetwork list=White
+/ip firewall address-list add address=1.25.24.4 list=White
+/ip firewall address-list add address=9.21.14.70 list=White
+/ip firewall address-list add address=vpnk.sb.ro.ru list=White
+/ip firewall address-list add address=172.16.64.0/19 list=White
+/ip firewall address-list add address=172.16.18.0/24 list=White
+/ip firewall address-list add address=172.16.20.0/23 list=White
+/ip firewall address-list add address=31.14.17.8 list=White
+/ip firewall filter remove [find where disabled=no]
+
+/ip firewall filter
+add action=drop chain=input comment="BEGIN! L2TP brutforce IP IPSec drop" connection-state=new log=yes protocol=ipsec-esp src-address-list=l2tp-brutforce
+add action=drop chain=input comment="L2TP brutforce IP drop" connection-state=new dst-port=1701,500,4500 log=yes protocol=udp src-address-list=l2tp-brutforce
+add action=add-src-to-address-list address-list=l2tp-brutforce address-list-timeout=2w chain=input comment="L2TP brutforce IP to list" connection-state=new dst-port=1701 protocol=udp src-address-list=probe2 src-address=!9.25.1.5
+add action=add-src-to-address-list address-list=probe2 address-list-timeout=1m chain=input comment="L2TP brutforce protection stage 2" connection-state=new dst-port=1701 protocol=udp src-address-list=probe1
+add action=add-src-to-address-list address-list=probe1 address-list-timeout=1m chain=input comment="L2TP brutforce protection stage 1" connection-state=new dst-port=1701 protocol=udp
+add action=add-dst-to-address-list address-list=l2tp-brutforce address-list-timeout=1m chain=output comment="L2TP-brutforce protection stage 3 v2" content="M=bad" dst-address-list=l2tp-brutforce-level2
+add action=add-dst-to-address-list address-list=l2tp-brutforce-level2 address-list-timeout=1m chain=output comment="L2TP-brutforce protection stage 2  v2" content="M=bad" dst-address-list=l2tp-brutforce-level1
+add action=add-dst-to-address-list address-list=l2tp-brutforce-level1 address-list-timeout=1m chain=output comment="L2TP-brutforce protection stage 1  v2" content="M=bad"
+add action=accept chain=input comment="L2TP allow only with IPsec" dst-port=1701 in-interface=ether1 ipsec-policy=in,ipsec protocol=udp src-address-list=White
+add action=drop chain=input comment="Drop L2TP without IPsec" dst-port=1701 in-interface=ether1 protocol=udp
+add action=accept chain=input comment="L2TP allow" dst-address=$externalselfIpAddr dst-port=500,4500 in-interface=ether1 protocol=udp src-address-list=White
+add action=accept chain=input comment="IPSec enable" in-interface=ether1 protocol=ipsec-esp src-address-list=White
+
+/ip firewall filter add action=accept chain=forward comment="EST Related" connection-state=established,related
+/ip firewall filter add action=drop chain=forward comment=Invalid connection-state=invalid
+/ip firewall filter add action=accept chain=input comment="Est, Related" connection-state=established,related
+/ip firewall filter add action=drop chain=input comment=Invalid connection-state=invalid
+/ip firewall filter add action=accept chain=input comment=ICMP protocol=icmp src-address-list=White
+/ip firewall filter add action=accept chain=input connection-state=new dst-port=22,443,80,8291 in-interface=ether1 protocol=tcp src-address-list=White
+/ip firewall filter add action=drop chain=input in-interface=ether1
+/ip firewall filter add action=drop chain=forward comment=!dstnat connection-nat-state=!dstnat connection-state=new in-interface=ether1
+/ip firewall filter add action=drop chain=forward comment="Drop packets from LAN that do not have LAN IP" in-interface=bridge log=yes log-prefix=LAN_!LAN src-address=$Notdhcpnetwork
+/ip firewall filter add action=accept chain=forward
+/ip firewall nat add action=masquerade chain=srcnat out-interface-list=WAN disabled=yes
+/ip firewall nat add action=src-nat chain=srcnat to-addresses=$externalselfIpAddr out-interface-list=WAN
+/ip firewall service-port set tftp disabled=yes
+/ip firewall service-port set sip disabled=yes
+/ip service set telnet disabled=yes
+/ip service set ftp disabled=yes
+/ip service set www disabled=no
+/ip service set api disabled=yes
+/ip service set api-ssl disabled=yes
+/ip ssh set allow-none-crypto=yes forwarding-enabled=remote
+/snmp set contact=s.ln@s.r.ru enabled=yes location=$Identity trap-generators=start-trap trap-version=2
+/system clock set time-zone-name=Europe/Moscow
+/system identity set name=$Identity
+/system logging set 0 disabled=yes
+/system logging add topics=account
+/tool bandwidth-server set enabled=no
+/tool e-mail set address=smtp.yandex.ru from=<RE@yandex.ru> password=2987 port=587 start-tls=yes user=RE@yandex.ru
+/tool mac-server set allowed-interface-list=LAN
+/tool mac-server mac-winbox set allowed-interface-list=LAN
+/tool mac-server ping set enabled=no
+/ip dhcp-server option add code=66 name=TFTP value="s'172.16.18.253'"
+/ip dhcp-server option sets add name=TFTP options=TFTP
+/ip dhcp-server set dhcp-option-set=TFTP numbers=0
+/certificate add name=root-cert common-name=Re days-valid=7777 key-usage=key-cert-sign,crl-sign
+:delay 2
+/certificate sign root-cert
+:delay 8
+/certificate add name=ssl-cert common-name=Re days-valid=7777
+:delay 2
+/certificate sign ca=root-cert ssl-cert
+:delay 8
+/ip service set www-ssl certificate=ssl-cert disabled=no
+/user add name=ane group=full password=Oa disabled=no
+
+/system script
+add dont-require-permissions=no name=Update owner=ansible policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon source="/system package update\
+    \ncheck-for-updates once\
+    \n:delay 5s;\
+    \n:if ( [get status] = \"New version is available\") do={ install }"
+
+/system scheduler
+add interval=1d name=AutoBackup on-event=\
+    ":system backup save name=\"flash/\$[/system identity get name]_autobackup.backup\";\r\
+    \n:delay 10s;\r\
+    \n:export terse file=\"flash/\$[/system identity get name]_config.rsc\";\r\
+    \n:delay 10s;\r\
+    \n:tool e-mail send file=\"flash/$[/system identity get name]_autobackup.backup\" to=EMAIL subject=\"$[/system identity get name]_backup\" policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon start-date=may/01/2019 start-time=21:00:00"
+add interval=1d name=AutoUpgrade on-event="/system package update\r\
+    \ncheck-for-updates once\r\
+    \n:delay 3s;\r\
+    \n:if ( [get status] = \"New version is available\") do={ install }" policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon start-date=may/01/2019 start-time=00:00:00
+
+
+/ip firewall mangle
+add action=mark-connection chain=prerouting comment=SIP dst-port=5060,5061,5160,10000-20000 new-connection-mark=SIP-Conn passthrough=no protocol=udp
+add action=mark-packet chain=forward connection-mark=SIP-Conn in-interface=ether1 new-packet-mark=SIP_IN passthrough=no
+add action=mark-packet chain=forward connection-mark=SIP-Conn new-packet-mark=SIP_OUT out-interface=ether1 passthrough=no
+add action=mark-connection chain=input comment=L2TP-SIP port=1701,500,4500 new-connection-mark=L2TP-SIP passthrough=no protocol=udp
+add action=mark-packet chain=input connection-mark=L2TP-SIP in-interface=ether1 new-packet-mark=L2TP-SIP_IN passthrough=no
+add action=mark-packet chain=output connection-mark=L2TP-SIP new-packet-mark=L2TP-SIP_OUT out-interface=ether1 passthrough=no
+add action=mark-connection chain=prerouting comment=IPSec new-connection-mark=L2TP-ipsec passthrough=no protocol=ipsec-esp
+add action=mark-packet chain=input connection-mark=L2TP-ipsec in-interface=ether1 new-packet-mark=L2TP-SIP_IN_Ipsec passthrough=no
+add action=mark-packet chain=output connection-mark=L2TP-ipsec new-packet-mark=L2TP-SIP_OUT_Ipsec out-interface=ether1 passthrough=no
+add action=mark-connection chain=prerouting comment=gre new-connection-mark=gre passthrough=no protocol=gre
+add action=mark-connection chain=postrouting new-connection-mark=gre passthrough=no protocol=gre
+add action=mark-packet chain=input connection-mark=gre in-interface=all-ppp new-packet-mark=gre_in passthrough=no
+add action=mark-packet chain=output connection-mark=gre new-packet-mark=gre_out out-interface=all-ppp passthrough=no
+add action=mark-connection chain=prerouting comment=IS_RE_Connection dst-address=19.6.7.0/24 new-connection-mark=IS_RE passthrough=no
+add action=mark-packet chain=forward connection-mark=IS_RE in-interface=ether1 new-packet-mark=IS_RE_in passthrough=no
+add action=mark-packet chain=forward connection-mark=IS_RE out-interface=ether1 new-packet-mark=IS_RE_out passthrough=no
+add action=mark-connection chain=prerouting comment=ZOOM dst-address-list=zoom-ip new-connection-mark=conn-zoom passthrough=yes
+add action=mark-packet chain=forward connection-mark=conn-zoom new-packet-mark=zoom-pkt_out passthrough=no src-address-list=LOCAL_IP
+add action=mark-packet chain=forward connection-mark=conn-zoom dst-address-list=LOCAL_IP new-packet-mark=zoom-pkt-in passthrough=no
+add action=mark-connection chain=prerouting comment=Other connection-mark=no-mark new-connection-mark=no-mark-all passthrough=yes
+add action=mark-packet chain=forward in-interface=ether1 connection-mark=no-mark-all new-packet-mark=Other_IN passthrough=no
+add action=mark-packet chain=forward connection-mark=no-mark-all new-packet-mark=Other_Out out-interface=ether1 passthrough=no
+
+/queue type
+add kind=pcq name=SIP pcq-classifier=src-address,dst-address,src-port,dst-port pcq-dst-address6-mask=64 pcq-rate=170k pcq-src-address6-mask=64
+
+/queue tree
+add max-limit=94M name=IN parent=global
+add max-limit=94M name=OUT parent=global
+add max-limit=2M name=SIP_IN packet-mark=SIP_IN parent=IN priority=2 queue=SIP
+add max-limit=2M name=SIP_OUT packet-mark=SIP_OUT parent=OUT priority=2 queue=SIP
+add max-limit=5M name=L2TP_SIP_IN packet-mark=L2TP-SIP_IN,L2TP-SIP_IN_Ipsec,gre_in parent=IN priority=3 queue=pcq-download-default
+add max-limit=5M name=L2TP_SIP_OUT packet-mark=L2tp-SIP_OUT,L2TP-SIP_OUT_Ipsec,gre_out parent=OUT priority=3 queue=pcq-upload-default
+add max-limit=90M name=Other_IN packet-mark=Other_IN parent=IN priority=6 queue=pcq-download-default
+add max-limit=90M name=Other_OUT packet-mark=Other_Out parent=OUT priority=6 queue=pcq-upload-default
+
+/system script
+add dont-require-permissions=no name=script1 owner=ansible policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon source="#variables\
+    \r\n:local pop 3\
+    \r\n:local ipaddr\
+    \r\n#searching for \"parsing packet failed, possible cause: wrong password\" string in log.\
+    \r\n:local l2tp [/log find message~\"parsing packet failed, possible cause: wrong password\"]\
+    \r\n#walking through array\
+    \r\nforeach i in=\$l2tp do={\
+    \r\n\t#searching IP address of remote host\
+    \r\n\t:set ipaddr [:pick [/log get \$i message ] 0 ([:len [/log get \$i message ]]-54)]\
+    \r\n                #execute if quantity of \"parsing packet failed\" records more than pop variable\
+    \r\n\t\t\t\tif ([:len [/log find message~\"parsing packet failed, possible cause: wrong password\"]]>=\$pop) do={\
+    \r\n\t\t\t\t\t#execute if IP address isn't in firewall adress-list\
+    \r\n\t\t\t\t\tif ([:len [/ip firewall address-list find address=\$ipaddr]]=0 ) do={\
+    \r\n\t\t\t\t\t\t#supplementation IP to address-list\t\t\
+    \r\n\t\t\t\t\t\t/ip firewall address-list add list=l2tp-brutforce address=[:toip \$ipaddr]\
+    \r\n\t\t\t\t\t\t/tool e-mail send to=\"s@sp.ru\" subject=\"L2TP allert\" body=\"\$ipaddr was blocked because of L2TP brutforce\"\
+    \r\n\t\t\t\t\t}\
+    \r\n               }\
+    \r\n}"
+
+add dont-require-permissions=no name=script2 owner=ansible policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon source="#variables\
+    \r\n:local pop 3\
+    \r\n:local ipaddr\
+    \r\n#searching for \"failed to pre-process ph2 packet\" string in log.\
+    \r\n:local l2tp [/log find message~\"failed to pre-process ph2 packet\"]\
+    \r\n#walking through array\
+    \r\nforeach i in=\$l2tp do={\
+    \r\n\t#searching IP address of remote host\
+    \r\n\t:set ipaddr [:pick [/log get \$i message ] 0 ([:len [/log get \$i message ]]-34)]\
+    \r\n                #execute if quantity of \"failed to pre-process ph2 packet\" records more than pop variable\
+    \r\n\t\t\t\tif ([:len [/log find message~\"failed to pre-process ph2 packet\"]]>=\$pop) do={\
+    \r\n\t\t\t\t\t#execute if IP address isn't in firewall adress-list\
+    \r\n\t\t\t\t\tif ([:len [/ip firewall address-list find address=\$ipaddr]]=0 ) do={\
+    \r\n\t\t\t\t\t\t#supplementation IP to address-list\t\t\
+    \r\n\t\t\t\t\t\t/ip firewall address-list add list=l2tp-brutforce address=[:toip \$ipaddr]\
+    \r\n\t\t\t\t\t\t/tool e-mail send to=\"s@spru\"  subject=\"L2TP allert\" body=\"\$ipaddr was blocked because of L2TP brutforce\"\
+    \r\n\t\t\t\t\t}\
+    \r\n               }\
+    \r\n}"
+
+add dont-require-permissions=no name=script3 owner=ansible policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon source="#variables\
+    \r\n:local pop 3\
+    \r\n:local ipaddr\
+    \r\n#searching for \"failed to get valid proposal.\" string in log.\
+    \r\n:local l2tp [/log find message~\"failed to get valid proposal.\"]\
+    \r\n#walking through array\
+    \r\nforeach i in=\$l2tp do={\
+    \r\n\t#searching IP address of remote host\
+    \r\n\t:set ipaddr [:pick [/log get \$i message ] 0 ([:len [/log get \$i message ]]-30)]\
+    \r\n                #execute if quantity of \"failed to get valid proposal.\" records more than pop variable\
+    \r\n\t\t\t\tif ([:len [/log find message~\"failed to get valid proposal.\"]]>=\$pop) do={\
+    \r\n\t\t\t\t\t#execute if IP address isn't in firewall adress-list\
+    \r\n\t\t\t\t\tif ([:len [/ip firewall address-list find address=\$ipaddr]]=0 ) do={\
+    \r\n\t\t\t\t\t\t#supplementation IP to address-list\t\t\
+    \r\n\t\t\t\t\t\t/ip firewall address-list add list=l2tp-brutforce address=[:toip \$ipaddr]\
+    \r\n\t\t\t\t\t\t/tool e-mail send to=\"sn@sp.ru\" start-tls=tls-only subject=\"L2TP allert\" body=\"\$ipaddr was blocked because of L2TP brutforce\"  server=[:resolve mail.my]\
+    \r\n\t\t\t\t\t}\
+    \r\n               }\
+    \r\n}"
+
+add dont-require-permissions=no name=export_email owner=ansible policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon source=\
+    "/export file=export;\
+    \r\n/tool e-mail send to=\"s@spo.ru\" subject=(\"\$[/system identity get name] export\") body=(\"\$[/system clock get date] configuration file\") file=export.rsc"
+
+add dont-require-permissions=no name=check_l2tp-in1 owner=ansible policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon source=\
+     "if ([/interface l2tp-server get number=0 dynamic] = true) do={/interface l2tp-server remove numbers=0;} else={:put OK}"
+
+add dont-require-permissions=no name=reconnect_l2tp-in1 owner=ansible policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon source=\
+    "/interface l2tp-server server set enabled=no; delay 2; /interface l2tp-server server set enabled=yes;"
+
+/system scheduler
+add interval=1d name=reconnect_l2tp-in1 on-event="/system script run check_l2tp-in1" policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon start-date=apr/06/2021 start-time=04:48:43
+add interval=1m name=check_l2tp on-event="/system script run check_l2tp-in1" policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon start-date=sep/07/2019 start-time=21:48:43
+add interval=10m name=schedule1 on-event="/system script run script1" policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon start-date=sep/07/2019 start-time=21:48:43
+add interval=10m name=schedule2 on-event="/system script run script2" policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon start-date=sep/07/2019 start-time=21:50:23
+add interval=10m name=schedule3 on-event="/system script run script3" policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon start-date=sep/07/2019 start-time=21:50:36
+add interval=7d name=export_email on-event="/system script run export_email" policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon start-date=sep/09/2019 start-time=09:30:30
+
+
+/ip firewall filter add action=accept chain=input in-interface=l2tp-in1 place-before=17
+/ip firewall filter add action=accept chain=forward in-interface=l2tp-in1 place-before=17
+/ip firewall filter add action=accept chain=forward out-interface=l2tp-in1 place-before=17
+/ip route add distance=1 dst-address=172.16.18.253/32 gateway=l2tp-in1
+/ip route add distance=1 dst-address=172.16.20.0/23 gateway=l2tp-in1
+
+#На клиенте
+ip firewall nat add chain=srcnat out-interface=L2TP_Ga_Re09 action=masquerade
+ip route add distance=1 dst-address=172.16.67.0/26 gateway=L2TP_Ga_Re
+
+---------------------------------------------------------------------------------
+QOS Zoom
+
+/ip firewall filter
+add action=add-dst-to-address-list address-list=zoom-ip address-list-timeout=1d chain=forward dst-address-list=!LOCAL-IP protocol=tcp dst-port=3478,3479,5090,5091,8801-8810 comment="ZOOM"
+add action=add-dst-to-address-list address-list=zoom-ip address-list-timeout=1d chain=forward dst-address-list=!LOCAL-IP protocol=udp dst-port=3478,3479,5090,5091,8801-8810
+
+/ip firewall mangle
+add action=mark-connection chain=prerouting dst-address-list=zoom-ip new-connection-mark="conn-zoom" passthrough=yes comment="ZOOM"
+add action=mark-packet chain=forward connection-mark="conn-zoom" new-packet-mark=zoom-pkt passthrough=no src-address-list=LOCAL-IP
+add action=mark-packet chain=forward connection-mark="conn-zoom" new-packet-mark=zoom-pkt passthrough=no dst-address-list=LOCAL-IP
+
+/ip firewall address-list
+add address=10.0.0.0/8 list=LOCAL-IP
+add address=172.16.0.0/12 list=LOCAL-IP
+add address=192.168.0.0/16 list=LOCAL-IP
+
+
+---------------------------------------------------------------------------------
+
+
+#Guest Wi-Fi
+
+/interface wireless security-profiles
+add authentication-types=wpa2-psk eap-methods="" mode=dynamic-keys name=\
+    profile_guest_wi-fi supplicant-identity="" wpa2-pre-shared-key=Pass55word!
+
+/interface wireless
+add disabled=no mac-address=00:00:00:00:00:00 master-interface=\
+    wlan1 name="Guest Wi-Fi" security-profile=profile_guest_wi-fi ssid=\
+    client wds-cost-range=0 wds-default-cost=0 wmm-support=disabled wps-mode=disabled
+
+/ip pool
+add name=dhcp_pool_guest ranges=10.11.12.101-10.11.12.150
+
+/ip dhcp-server
+add address-pool=dhcp_pool_guest disabled=no interface="Guest Wi-Fi" \
+    lease-time=12h name=dhcp_guest
+
+/ip address
+add address=10.11.12.1/24 interface="Guest Wi-Fi" network=10.11.12.0
+
+/ip dhcp-server network
+add address=10.11.12.0/24 dns-server=10.11.12.1,8.8.8.8 gateway=10.11.12.1
+
+/ip firewall filter
+add action=drop chain=forward dst-address=172.16.0.0/12 src-address=10.0.25.0/24
+add action=drop chain=forward dst-address=10.0.25.0/24 src-address=172.16.0.0/12
+add action=drop chain=input connection-state=new dst-port=80,22,443,8291 protocol=tcp src-address=10.0.25.0/24
